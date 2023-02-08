@@ -4,7 +4,7 @@ Exploring the possibility for diurnal migration of OH and H2O on the lunar surfa
 (polar == permenantly shadowed regions)
 
 
-by: Kris L. Laferriere, ?, Ali M. Bramson
+by: Kris L. Laferriere, Alex Gleason, Ali M. Bramson
 
 This repository contains the data set used, the model(s), tests, the results, and the graphing code.
 
