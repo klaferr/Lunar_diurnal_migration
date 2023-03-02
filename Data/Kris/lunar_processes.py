@@ -71,7 +71,7 @@ Comet_diurnal = Comet_flux/(Gyr_E)
 ## Residence timescale
 
 # Photolysis -options
-photo_rate_S14 = 1.26*10**(-5)                      # 1/s
+photo_rate_S14 = 1.26*10**(-5)                      # 1/s.
 photo_lifespan_S14 = 1/photo_rate_S14               # s
 
 photo_lifespan_H92 = 5*10**4                        # s
@@ -421,7 +421,8 @@ def DivinerT(lat_r, long_r, tod, data):
 #%% Mechanisms
 def random_vals():
     direction = random.uniform(0, 2*np.pi)
-    launch = random.uniform(0, np.pi/2)
+    launch_range = np.linspace(0, np.pi/2, 1000)
+    launch = random.choices(launch_range, weights=np.cos(launch_range))[0]
     return direction, launch
 
 def loss(sigma_Sputtering, photo_lifespan, f_tof, tod):
@@ -449,11 +450,12 @@ def surftime(R_bar, Temperature, pMass):
 
     perc_mono = 0.01
     theta_mon = 10**19 * perc_mono
-    tau_sub = (theta_mon * pMass) / sub
+    tau_sub = (theta_mon * pMass*Avo) / sub
     
     return np.minimum(tau_surf, tau_sub)
 
 #%%
+import time
 local_noon = 0
 def Model_MonteCarlo(particle, dt, t, local_noon):
     R_bar = R/(m_H2O/1000)
@@ -476,7 +478,8 @@ def Model_MonteCarlo(particle, dt, t, local_noon):
     lunar_dt = sec_per_hour_M*dt
 
     # let particle run for 1 lunar rotation
-    for i in range(0, int(t/dt), 1):     
+    for i in range(0, int(t/dt), 1):
+        st_time = time.time()
         #print('Lunar time: %2.1f'%i)
         # find initial temperature from location
         results[3, i], n = DivinerT(results[0, i], results[1, i], results[2, i], data)
@@ -552,7 +555,8 @@ def Model_MonteCarlo(particle, dt, t, local_noon):
             results[7, i] = tot_dist                
             #print('Particle ends jump after %3.2e'%tot_time)
             #print('Particle is at: (%2.1f, %2.1f), %2.1f hr'%(np.rad2deg(results[0, i]), np.rad2deg(results[1, i]), results[2, i]))
-        
+        en = time.time()
+        print('Time of step %3.0f is: %3.2f'%(i, en-st_time))
         if conda == True or condb == True or condc == True:
             #print('Particle is lost from the simulation')
             conda = False
@@ -568,6 +572,250 @@ def Model_MonteCarlo(particle, dt, t, local_noon):
     return results[:, :-1]
 
  
+#%%    
+    
+# constants
+sigma = 5.67*10**(-8) #W/m2/K4
+A = 0.1 # mare, visual. ~0.3 for Highlands, visual
+R = 1.0 # distance from sun, AU (simplified)
+So = 1367 # solar flux, W/m2
+epsilon = 0.95
+
+# Functions
+def beta(S0, A, r):
+    # S0: solar constant at 1 AU
+    # A: Surface albedo
+    # r: distance from the sun in AU
+    return S0*(1-A)/(r)**2
+
+def rho(sigma, epsilon, beta):
+    return sigma*epsilon/beta
+
+def solar_zenith(lat, delta, h):
+    # phi: local latitude
+    # delta: declination of the sun
+    # h: hour angle (local solar time) (from noon)
+    cos_z = np.sin(lat)*np.sin(delta) + np.cos(lat)*np.cos(delta)*np.cos(h)
+    return np.arccos(cos_z)
+
+def f_cosi_theta(omega, i, z):
+    c_p = np.cos(i + z)
+    c_n = np.cos(i - z)
+    coeff1 = omega/(np.sqrt(np.pi*((1-(c_p/c_n)))))
+    coeff2 = 1+ (1/(omega**2 * c_n**2))
+    expo = (1/(2*omega**2))*(1-(1/(c_n**2)))
+    return coeff1*coeff2*np.exp(expo)
+
+def f_F(F, beta, z, omega):
+    phi1 = np.sqrt(1-((F**2)/(beta**2)))
+    phi2 = ((F/beta)*(1/np.tan(z))) / phi1
+    phi3 = phi1**2 * (1+phi2)**2 * (np.sin(z))**2
+
+    coeff1 = omega /(np.sqrt(2*np.pi*beta**2))
+    coeff2 = np.sqrt(1+phi2*(1/np.tan(z)))/phi1
+    coeff3 = (1+(1/(omega**2 * phi3)))
+    expo = (1/(2*omega**2) *(1 - (1/phi3)))
+    return coeff1*coeff2*coeff3*np.exp(expo)
+
+def f_T(T, omega, rho, z):
+    tau1 = np.sqrt(1-((rho**2) * (T**8)))
+    tau2 = (rho*T**4)/(tau1 * np.tan(z))
+    tau3 = tau1**2 * (1+tau2)**2 * (np.sin(z))**2
+
+    coeff1 = (4*omega*rho*(T**3)) / (np.sqrt(2*np.pi))
+    coeff2 = np.sqrt(1+tau2*(1/np.tan(z)))/tau1
+    coeff3 = (1+(1/(omega**2 * tau3)))
+    expo =  (1/(2*omega**2)) * (1-(1/tau3)) #(1- (1/(tau1**2 * tau3)))  
+
+    return coeff1*coeff2*coeff3*np.exp(expo)
+
+
+def LOLA(lat, long, data):
+    # grab the RMS slope at that lat, long
+    # w, h: 2880, 5760 
+    # one row for each 0.0625 degrees of latitude
+    
+    res = 0.0625
+    lat_d = np.rad2deg(lat)
+    print
+    long_d = np.rad2deg(long)
+    X = int(long_d/res)
+    Y = int((lat_d+90)/res)
+    
+    omega = data[X, Y]
+    return omega
+    # read in LOLA bidirectional surface roughness from map
+    
+
+def roughT(lat, long, tod, data, LOLAdata):
+    temp_flat, n = DivinerT(lat, long, tod, data) 
+
+    if tod < 6 or tod > 18:
+        #phi = np.arccos(np.cos((np.deg2rad((tod*15 - 180)))))
+        # Prem et al. (2018)
+        #a = np.array([444.738, -448.937, 239.668, -63.8844, 8.34064, -0.423502])
+        #sums = np.zeros(5)
+        #for j in range(0, 5):
+        #    sums[j] = a[j]*phi**j
+        #T = np.sum(sums) + 35*(np.sin(np.abs(lat))-1)
+        T = temp_flat
+        #print('Nighttime:', temp_flat, T)
+        
+    else:
+        # Rubanenko et al. (2021)
+        wbi_LOLA = LOLA(lat, long, LOLAdata)
+        w = np.tan(np.deg2rad(wbi_LOLA))/np.sqrt(2)
+        
+        theta = np.deg2rad(0) # slope aspect
+        a = np.deg2rad(0) # the orientation of the sun 
+        i_arr = np.deg2rad(np.linspace(1, 90, 90))
+        
+        # solar_zenith angle:
+        #z = np.deg2rad(15) # solar zenith angle
+        hr_angle = np.deg2rad((tod*15)-180)
+        z = solar_zenith(lat, 0, hr_angle)
+        
+        # expected cosi       
+        fcosi_n = f_cosi_theta(w, i_arr, z)/np.max(f_cosi_theta(w, i_arr, z))
+    
+        # F:
+        F_arr = (So*(1-A)/((R)**2))*np.cos(i_arr)
+        B = F_arr/np.cos(i_arr)
+        PDF_F = f_F(F_arr, B, z, w)
+    
+        # T:
+        p = sigma*epsilon/B
+        T_arr = (F_arr/(sigma*epsilon))**(1/4)
+        PDF_T = f_T(T_arr, w, p, z)
+        
+        norm_weights = PDF_T/np.trapz(PDF_T)
+        
+        T = random.choices(T_arr, weights=norm_weights)[0]
+        #print('Daytime:', temp_flat, T_arr[np.argwhere(PDF_T==np.nanmax(PDF_T))], T)
+    
+    return T
+
+
+def Model_MonteCarlo_Rough(particle, dt, t, local_noon):
+    
+    #placeholder:
+    loladata = omegaT
+    
+    R_bar = R/(m_H2O/1000)
+    pMass = mass
+    sigma_Sputtering = sput_lifespan_G19
+    photo_lifespan =  photo_lifespan_S14
+
+    # results array
+    results = np.zeros((8, int(t/dt)+1))*np.nan # (lat, long, tod, temp, exists, total time, hops, dist), 2rd is time
+    
+    # if exists = True, set 1. Else, set 0
+    
+    i = 0
+    results[0:3, 0] = particle
+    results[4, 0] = False
+    conda = False
+    condb = False
+    condc = False
+    
+    lunar_dt = sec_per_hour_M*dt
+
+    # let particle run for 1 lunar rotation
+    for i in range(0, int(t/dt), 1):
+        st_time = time.time()
+        #print('Lunar time: %2.1f'%i)
+
+        results[3, i] = roughT(results[0, i], results[1, i], results[2, i], data, loladata)
+        #print('Surface temperature: %2.0f K '%results[3, i])
+
+        # define how long it sits for
+        tau_surf = surftime(R_bar, results[3, i], pMass)  
+
+        # if it sits for a timestep, test lost, then move to next timestep
+        if tau_surf >= lunar_dt:
+            #print('Particle sits longer than a lunar time step')
+            #print('Latitude: %2.0f, Longitude: %2.0f' %(np.rad2deg(results[0, i]), np.rad2deg(results[1, i])))
+            conda = loss(sigma_Sputtering, photo_lifespan, lunar_dt, results[2, i])
+            if conda == True:
+                #print('Particle is lost from sitting')
+                results[4, i] = conda
+                break
+            else:
+                #print('Particle is not lost from sitting')
+                results[0:3, i+1] = results[0:3, i]
+                results[4, i+1] = conda
+                results[5, i] = 0
+                results[6, i] = 0
+                results[7, i] = 0
+
+        else: 
+            #print('Particle begins jump')
+            tof_tot = 0
+            tot_time = 0
+            tot_dist = 0
+            #conda == False
+            hops = 0
+            while tot_time < lunar_dt:
+                #print(tot_time, lunar_dt)
+                # while the time of jumping is less than a timestep
+                conda = loss(sigma_Sputtering, photo_lifespan, tau_surf, results[2, i])
+                if conda == True:
+                    #print('Particle is lost during sitting, following a jump')
+                    # if lost to loss mechanism, exit loop. 
+                    results[4, i+1] = conda
+                    break
+                else:
+                    # let it bounce
+                    direction, launch = random_vals() 
+                    results[0:3, i+1], f_tof, distm, condc = ballistic(results[3, i], results[0, i], results[1, i], results[2, i], direction, launch, pMass, vel_dist)
+                    #print(results[0:3, i+1], f_tof, distm, condc)
+                    if condc == True:
+                        #print('Particle is lost to jeans loss')
+                        results[4, i+1] = condc
+                        break
+                    else:
+                        condb = loss(sigma_Sputtering, photo_lifespan, f_tof, results[2, i])
+
+                        hops += 1
+                        tof_tot += f_tof
+                        tot_dist += distm
+
+                        # is it detroyed in the jump?
+                        if condb == True:
+                            #print('Particle is lost in jump')
+                            results[4, i+1] = condb
+                            break
+                        else:
+                            results[4, i+1] = condb
+                            results[3, i+1] = roughT(results[0, i+1], results[1, i+1], results[2, i+1], data, loladata)
+                            tau_surf = surftime(R_bar, results[3, i+1], pMass)
+                            #print(tau_surf, f_tof)
+                            # advance total time. 
+                            tot_time += (f_tof + tau_surf)
+                            
+            results[5, i] = tof_tot
+            results[6, i] = hops
+            results[7, i] = tot_dist                
+            #print('Particle ends jump after %3.2e'%tot_time)
+            #print('Particle is at: (%2.1f, %2.1f), %2.1f hr'%(np.rad2deg(results[0, i]), np.rad2deg(results[1, i]), results[2, i]))
+        #en = time.time()
+        #print('Time of step %3.0f is: %3.2f'%(i, en-st_time))
+        if conda == True or condb == True or condc == True:
+            #print('Particle is lost from the simulation')
+            conda = False
+            condb = False
+            condc = False
+            break
+        else:
+            #print('Moon rotates')
+            local_noon += (360/(t/dt)) # degrees
+            #print('Local noon: %2.1f'%local_noon)
+            results[2, i+1] = (12 + (np.rad2deg(results[1, i+1])+local_noon)*(24/360))%24 
+            #print('New time of day: %2.1f'%results[2, i+1])
+    return results[:, :-1]
+
+
+
 
 #%% Using Diviner Bolometric temperatures - this takes ~ 3 min if file doesn't exist
 def Diviner_nan(data):
@@ -628,3 +876,20 @@ else:
     
     # save it
     np.save(loc+'global_cuml_avg_cyl_90S_90N.npy', data, allow_pickle=True)
+    
+#%% Load in LOLA RMS roughness mpas
+loc = '/Users/laferrierek/Box Sync/Desktop/Research/Moon_Transport/Codes/Data/'
+filename = 'MAS_57M_16.img' # this is on a 57 meter scale. 
+
+# set width and height - this is true for all three
+w, h = 2880, 5760 
+
+with open(loc+filename, 'rb') as f: 
+    omegas_scaled = np.fromfile(f, dtype=np.int16).reshape(w, h)
+
+# scaled back to din degrees    
+omegas = omegas_scaled*0.0015 + 45    
+
+omegaT = omegas.T
+
+    
