@@ -6,6 +6,5 @@ dependencies:
   - numpy
   - matplotlib
   - scipy
-  - random
   - time
   - pathlib
