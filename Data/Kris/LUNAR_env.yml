@@ -1,0 +1,11 @@
+name: LUNAR_env
+channels:
+  - conda-forge
+dependencies:
+  - python=3.8.13
+  - numpy
+  - matplotlib
+  - scipy
+  - random
+  - time
+  - pathlib
