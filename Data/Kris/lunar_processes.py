@@ -11,6 +11,7 @@ import numpy as np
 from pathlib import Path
 import random
 from scipy import interpolate
+import time
 
 #%% Define values for inputs
 # Constants
@@ -20,10 +21,17 @@ kb = 1.38064*10**(-23)              # J/K
 R = 8.3145                          # J/mol/K
 vel_dist = np.arange(0, 3000, 1)
 
+# constants
+sigma = 5.67*10**(-8) #W/m2/K4
+A = 0.1 # mare, visual. ~0.3 for Highlands, visual
+So = 1367 # solar flux, W/m2
+epsilon = 0.95
+
 # Molecules
 m_H2O= 18.01528                     # g/ mol
 m_OH = 17.008                       # g/mol
-mass = (m_H2O/1000) / Avo           # kg/mol / (1/mol)
+mass_H2O = (m_H2O/1000) / Avo           # kg/mol / (1/mol)
+mass_OH = (m_OH/1000) / Avo
 density_H2O = 997
 
 # Molecule - Water
@@ -68,43 +76,30 @@ Comet_flux = 2.5*10**15                             # kg/Ga
 Comet_density = 66                                  # kg/Ga/m^2
 Comet_diurnal = Comet_flux/(Gyr_E)
 
-## Residence timescale
+## Residence timescalex
 
-# Photolysis -options
+# Photodestruction
 photo_rate_S14 = 1.26*10**(-5)                      # 1/s.
 photo_lifespan_S14 = 1/photo_rate_S14               # s
 
-photo_lifespan_H92 = 5*10**4                        # s
-
-photo_lifespan_G19 = [1.5*10**5, 5*10**6]           # s
-photo_probabiility_inflight_G19 = 0.02
-
-photo_lifespan_S22 = 25*sec_per_hour_E
-
-photo_rate_H92 = 1.20*10**(-5) # 1/s
-#? = np.cos(i)/lifespan_G19
-
-# Diffusion
-diff_lifespan = [10**(-8), 10**(-6)]
-diff_activation_energy = 0.8 #eV
+## OH
+photo_rate_S23_OH = 7.49*10**(-6) # Smolka et al. 2023, 1/s
+## H2O
+photo_rate_S14_H2O = 1.26*10**(-5) # 1/s
 
 # Sputtering
 sput_rate_G19 = 1.3*10**(-10)           # 1/s
 sput_lifespan_G19 = 1/sput_rate_G19
-F_solarwind_proton_S01 = 3*10**12       # m^-2 s^-1
-
-#h_imp = 10**(-7)    # implantation depth Farrell et al. (2015), m
-#Y_0 = 0.1           # total sputteirng yield Wurz et al. (2007), unitless
-#C_0 = 2.3*10**23    # atomic abundance for anorthite Vasavada 1999, /m^3
-
-# exosphere
-exo_lifespan = 23 # hr
+## OH
+sput_rate_G19_OH = 1.3*10**(-10) # 1/S
+## H2O
+sput_rate_S23_H2O = 2.4*10**(-8) #1/s, Smolka 2023
 
 # h2o on h2o, Prem et al. 2015
 deltaH = 6.6*10**(-20) # J, binding energy for H2O on H2O matrix
 v0 = 2*10**(12) #1/s, lattice vibrational frequency of H2O within H2O matrix)
 
-
+# other people have opinions on the prem values
 
 #%% Transport functions
 # Orbits
@@ -209,6 +204,11 @@ def ballistic_tof(vm, phi):
     t0 =  ((v/np.abs(v))*(np.sqrt(u*v)/b + l/(2*b)*((1/np.sqrt(-b))*np.arcsin(p)))) # at0
     
     time_of_flight = 2*(t-t0)
+    
+    hmax = (moonR*voy**2)/(2*moonR*g-voy**2)
+    # if hmax > 6.15*10**7: #equation: a*(moonM/3*earthM)**(1/3); where a = 384400 km, 
+        # raise Exception("exceed's hill sphere!")
+        # print("hmax:", hmax)
     return time_of_flight 
 
 def ballistic(temp, i_lat, i_long, i_tod, direction, launch, pMass, vel_dist):
@@ -250,16 +250,6 @@ def sputtering_prob(tau, tof):
         sputter = False
     return sputter
 
-def sputtering(F_sw, h_imp, Y_0, C_0):
-    # Grumpe et al. 2019 - following eq 4
-    # F_sw = solar wind
-    # h_imp = 10**(-7) # m - implantation depth
-    # Y_O = total sputtering yield for O ~ 0.1 
-    # C_O = oxygen number density ~2.3*10^28 /m^3 for anorthite
-    
-    # this is equal to 1.3*10**(-10) /s
-    return (F_sw/h_imp)*(Y_0/C_0)
-
 # Photodissociation
 def photodestruction_inflight_prob(tau, tof):
     # this is equiv. to 1-e^(-t/tau), where if happens < prob, it is lost
@@ -277,10 +267,6 @@ def clapyeron(triple_pressure, triple_T, R_bar, Lc, T):
     # Pascal
     # Lc/R_bar or Q/R, where R_bar = R/mass_molecule
     return triple_pressure*np.exp( (Lc/R_bar) * ((1/triple_T) - (1/T)))
-
-def sublimation_depth(mu, delta, z, E):
-    # Assumes E(z) can be calculated for a T at z. 
-    return (1/Avo)*mu*delta*E/(2*z)      # kg/m2/s
 
 def sublimation_surf(P, T, mu):
     # Siegler et al. 2015
@@ -308,9 +294,6 @@ def sublimation_surf(P, T, mu):
     # output units are kg/m2/s
     return P*np.sqrt(mu/(2*np.pi*R*T))
 
-# Diffusion
-#def diffusion():
-#    return
 
 # desorption
 def desorption_R21(T, Ed):
@@ -333,23 +316,9 @@ def desorp_prob(tau, tof):
         destroy = False
     return destroy
 
-def desorption_F15(T, U, h):
-    # From Farrell, Hurley, Zimmerman 2015
-    D = 10**(-6) # m^2/s
-    kb_eV = kb/(1.60218*10**(-19))
-    return h**2/D * np.exp(U/(kb_eV*T))
-
-def absorption(tau):
-    # From Sarantos and Tsavachidis 2021
-    Rdes = 1/tau
-    e = random.uniform(0, 1)
-    ta = -np.ln(1-e)/Rdes
-    return ta
-
-
 #%% Temperature from data
 def DivinerT(lat_r, long_r, tod, data):
-    delta = 0.25*2
+    delta = 0.26*2
     delta_tod = 0.28*2
     lat = np.rad2deg(lat_r)
     long = np.rad2deg(long_r - np.pi) 
@@ -443,26 +412,32 @@ def surftime(R_bar, Temperature, pMass):
     # desorption
     Ed = 0.6
     tau_surf = desorption_R21(Temperature, Ed)
-    #tau_surf = residence_surface_T(2*10**12, 0.6, Temperature)
 
     Pv = clapyeron(triple_P, triple_T, R_bar, Lc, Temperature)
     sub = sublimation_surf(Pv, Temperature, pMass*Avo)
 
     perc_mono = 0.01
     theta_mon = 10**19 * perc_mono
-    tau_sub = (theta_mon * pMass*Avo) / sub
+    tau_sub = (theta_mon/Avo*(m_H2O/1000)) / sub
     
     return np.minimum(tau_surf, tau_sub)
 
-#%%
-import time
-local_noon = 0
-def Model_MonteCarlo(particle, dt, t, local_noon):
-    R_bar = R/(m_H2O/1000)
-    pMass = mass
-    sigma_Sputtering = sput_lifespan_G19
-    photo_lifespan =  photo_lifespan_S14
-
+#%% Smooth model
+def Model_MonteCarlo(particle, dt, t, local_noon, molecule):
+    if molecule == "H2O":
+        R_bar = R/(m_H2O/1000)
+        pMass = mass_H2O
+        sigma_Sputtering = 1/sput_rate_S23_H2O
+        photo_lifespan =  1/photo_rate_S14_H2O
+    elif molecule == "OH":
+        R_bar = R/(m_H2O/1000)
+        pMass = mass_H2O
+        sigma_Sputtering = 1/sput_rate_G19_OH
+        photo_lifespan =  1/photo_rate_S23_OH
+        
+    else:
+        raise Exception("Must be OH or H2O")
+    
     # results array
     results = np.zeros((8, int(t/dt)+1))*np.nan # (lat, long, tod, temp, exists, total time, hops, dist), 2rd is time
     
@@ -479,7 +454,7 @@ def Model_MonteCarlo(particle, dt, t, local_noon):
 
     # let particle run for 1 lunar rotation
     for i in range(0, int(t/dt), 1):
-        st_time = time.time()
+        # st_time = time.time()
         #print('Lunar time: %2.1f'%i)
         # find initial temperature from location
         results[3, i], n = DivinerT(results[0, i], results[1, i], results[2, i], data)
@@ -555,8 +530,8 @@ def Model_MonteCarlo(particle, dt, t, local_noon):
             results[7, i] = tot_dist                
             #print('Particle ends jump after %3.2e'%tot_time)
             #print('Particle is at: (%2.1f, %2.1f), %2.1f hr'%(np.rad2deg(results[0, i]), np.rad2deg(results[1, i]), results[2, i]))
-        en = time.time()
-        print('Time of step %3.0f is: %3.2f'%(i, en-st_time))
+        #en = time.time()
+        #print('Time of step %3.0f is: %3.2f'%(i, en-st_time))
         if conda == True or condb == True or condc == True:
             #print('Particle is lost from the simulation')
             conda = False
@@ -572,14 +547,7 @@ def Model_MonteCarlo(particle, dt, t, local_noon):
     return results[:, :-1]
 
  
-#%%    
-    
-# constants
-sigma = 5.67*10**(-8) #W/m2/K4
-A = 0.1 # mare, visual. ~0.3 for Highlands, visual
-R = 1.0 # distance from sun, AU (simplified)
-So = 1367 # solar flux, W/m2
-epsilon = 0.95
+#%% Rubanenko et al. (2020) roughness surface temperatures   
 
 # Functions
 def beta(S0, A, r):
@@ -637,9 +605,8 @@ def LOLA(lat, long, data):
     
     res = 0.0625
     lat_d = np.rad2deg(lat)
-    print
     long_d = np.rad2deg(long)
-    X = int(long_d/res)
+    X = int((long_d-180)/res)
     Y = int((lat_d+90)/res)
     
     omega = data[X, Y]
@@ -666,22 +633,24 @@ def roughT(lat, long, tod, data, LOLAdata):
         wbi_LOLA = LOLA(lat, long, LOLAdata)
         w = np.tan(np.deg2rad(wbi_LOLA))/np.sqrt(2)
         
-        theta = np.deg2rad(0) # slope aspect
-        a = np.deg2rad(0) # the orientation of the sun 
-        i_arr = np.deg2rad(np.linspace(1, 90, 90))
+        #theta = np.deg2rad(0) # slope aspect
+        #a = np.deg2rad(0) # the orientation of the sun 
+        i_arr = np.deg2rad(np.linspace(1, 90, 180))
         
         # solar_zenith angle:
         #z = np.deg2rad(15) # solar zenith angle
         hr_angle = np.deg2rad((tod*15)-180)
         z = solar_zenith(lat, 0, hr_angle)
+        if z == 0:
+            print("zenith is zero, special case")
         
         # expected cosi       
-        fcosi_n = f_cosi_theta(w, i_arr, z)/np.max(f_cosi_theta(w, i_arr, z))
+        #fcosi_n = f_cosi_theta(w, i_arr, z)/np.max(f_cosi_theta(w, i_arr, z))
     
         # F:
-        F_arr = (So*(1-A)/((R)**2))*np.cos(i_arr)
+        F_arr = (So*(1-A)/((rEarth)**2))*np.cos(i_arr)
         B = F_arr/np.cos(i_arr)
-        PDF_F = f_F(F_arr, B, z, w)
+        #PDF_F = f_F(F_arr, B, z, w)
     
         # T:
         p = sigma*epsilon/B
@@ -696,15 +665,23 @@ def roughT(lat, long, tod, data, LOLAdata):
     return T
 
 
-def Model_MonteCarlo_Rough(particle, dt, t, local_noon):
+def Model_MonteCarlo_Rough(particle, dt, t, local_noon, molecule, omegaT):
+    if molecule == "H2O":
+        R_bar = R/(m_H2O/1000)
+        pMass = mass_H2O
+        sigma_Sputtering = 1/sput_rate_S23_H2O
+        photo_lifespan =  1/photo_rate_S14_H2O
+    elif molecule == "OH":
+        R_bar = R/(m_H2O/1000)
+        pMass = mass_H2O
+        sigma_Sputtering = 1/sput_rate_G19_OH
+        photo_lifespan =  1/photo_rate_S23_OH
+        
+    else:
+        raise Exception("Must be OH or H2O")
     
-    #placeholder:
+    #roughness data
     loladata = omegaT
-    
-    R_bar = R/(m_H2O/1000)
-    pMass = mass
-    sigma_Sputtering = sput_lifespan_G19
-    photo_lifespan =  photo_lifespan_S14
 
     # results array
     results = np.zeros((8, int(t/dt)+1))*np.nan # (lat, long, tod, temp, exists, total time, hops, dist), 2rd is time
@@ -722,7 +699,7 @@ def Model_MonteCarlo_Rough(particle, dt, t, local_noon):
 
     # let particle run for 1 lunar rotation
     for i in range(0, int(t/dt), 1):
-        st_time = time.time()
+        #st_time = time.time()
         #print('Lunar time: %2.1f'%i)
 
         results[3, i] = roughT(results[0, i], results[1, i], results[2, i], data, loladata)
@@ -877,19 +854,6 @@ else:
     # save it
     np.save(loc+'global_cuml_avg_cyl_90S_90N.npy', data, allow_pickle=True)
     
-#%% Load in LOLA RMS roughness mpas
-loc = '/Users/laferrierek/Box Sync/Desktop/Research/Moon_Transport/Codes/Data/'
-filename = 'MAS_57M_16.img' # this is on a 57 meter scale. 
 
-# set width and height - this is true for all three
-w, h = 2880, 5760 
-
-with open(loc+filename, 'rb') as f: 
-    omegas_scaled = np.fromfile(f, dtype=np.int16).reshape(w, h)
-
-# scaled back to din degrees    
-omegas = omegas_scaled*0.0015 + 45    
-
-omegaT = omegas.T
 
     
