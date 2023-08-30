@@ -243,7 +243,11 @@ def landing_loc(in_lat, in_long, distance, radius, travel_dir):
 def sputtering_prob(tau, tof):
     prob = tof/tau
     test = random.randint(0, 99)
-    happens = random.sample(range(0,100), round(prob*100))
+    if round(prob*100) <= 0:
+        rounds = int(0)
+    else:
+        rounds = round(prob*100)
+    happens = random.sample(range(0,100), rounds)
     if test in happens:
         sputter = True
     else:
@@ -800,60 +804,14 @@ def Diviner_nan(data):
     data[mask, 10] = np.nan
     return data
 
-loc = '/Users/laferrierek/Box Sync/Desktop/Research/Moon_Transport/Codes/Data/'
-path_to_file = loc+'global_cuml_avg_cyl_90S_90N.npy'
-path = Path(path_to_file)
+#loc = ''
+path_to_file = '/home/klaferri/Desktop/Research/Lunar_diurnal_migration/Data/Kris/global_cuml_avg_cyl_90S_90N.npy'
+#path = Path(path_to_file)
+data = np.load(path_to_file, allow_pickle=True)
+#if path.is_file():
+#    data = np.load(path_to_file, allow_pickle=True)
 
-if path.is_file():
-    data = np.load(path_to_file, allow_pickle=True)
-
-else:
-
-    data0_10N = np.loadtxt(loc+'global_cumul_avg_cyl_00n10n_002.txt', delimiter=',', skiprows=1)
-    data10_20N = np.loadtxt(loc+'global_cumul_avg_cyl_10n20n_002.txt', delimiter=',', skiprows=1)
-    data20_30N = np.loadtxt(loc+'global_cumul_avg_cyl_20n30n_002.txt', delimiter=',', skiprows=1)
-    data30_40N = np.loadtxt(loc+'global_cumul_avg_cyl_30n40n_002.txt', delimiter=',', skiprows=1)
-    data40_50N = np.loadtxt(loc+'global_cumul_avg_cyl_40n50n_002.txt', delimiter=',', skiprows=1)
-    data50_60N = np.loadtxt(loc+'global_cumul_avg_cyl_50n60n_002.txt', delimiter=',', skiprows=1)
-    data60_70N = np.loadtxt(loc+'global_cumul_avg_cyl_60n70n_002.txt', delimiter=',', skiprows=1)
-    data70_80N = np.loadtxt(loc+'global_cumul_avg_cyl_70n80n_002.txt', delimiter=',', skiprows=1)
-    data80_90N = np.loadtxt(loc+'global_cumul_avg_cyl_80n90n_002.txt', delimiter=',', skiprows=1)
-    
-    data0_10S = np.loadtxt(loc+'global_cumul_avg_cyl_10s00s_002.txt', delimiter=',', skiprows=1)
-    data10_20S = np.loadtxt(loc+'global_cumul_avg_cyl_20s10s_002.txt', delimiter=',', skiprows=1)
-    data20_30S = np.loadtxt(loc+'global_cumul_avg_cyl_30s20s_002.txt', delimiter=',', skiprows=1)
-    data30_40S = np.loadtxt(loc+'global_cumul_avg_cyl_40s30s_002.txt', delimiter=',', skiprows=1)
-    data40_50S = np.loadtxt(loc+'global_cumul_avg_cyl_50s40s_002.txt', delimiter=',', skiprows=1)
-    data50_60S = np.loadtxt(loc+'global_cumul_avg_cyl_60s50s_002.txt', delimiter=',', skiprows=1)
-    data60_70S = np.loadtxt(loc+'global_cumul_avg_cyl_70s60s_002.txt', delimiter=',', skiprows=1)
-    data70_80S = np.loadtxt(loc+'global_cumul_avg_cyl_80s70s_002.txt', delimiter=',', skiprows=1)
-    data80_90S = np.loadtxt(loc+'global_cumul_avg_cyl_90s80s_002.txt', delimiter=',', skiprows=1)
-
-    data0_10N = Diviner_nan(data0_10N)
-    data10_20N = Diviner_nan(data10_20N)
-    data20_30N = Diviner_nan(data20_30N)
-    data30_40N = Diviner_nan(data30_40N)
-    data40_50N = Diviner_nan(data40_50N)
-    data50_60N = Diviner_nan(data50_60N)
-    data60_70N = Diviner_nan(data60_70N)
-    data70_80N = Diviner_nan(data70_80N)
-    data80_90N = Diviner_nan(data80_90N)
-    
-    data0_10S = Diviner_nan(data0_10S)
-    data10_20S = Diviner_nan(data10_20S)
-    data20_30S = Diviner_nan(data20_30S)
-    data30_40S = Diviner_nan(data30_40S)
-    data40_50S = Diviner_nan(data40_50S)
-    data50_60S = Diviner_nan(data50_60S)
-    data60_70S = Diviner_nan(data60_70S)
-    data70_80S = Diviner_nan(data70_80S)
-    data80_90S = Diviner_nan(data80_90S)
-    
-    data = np.stack([data80_90S, data70_80S, data60_70S, data50_60S, data40_50S, data30_40S, data20_30S, data10_20S, data0_10S, data0_10N, data10_20N, data20_30N, data30_40N, data40_50N, data50_60N, data60_70N, data70_80N, data80_90N])
-    
-    # save it
-    np.save(loc+'global_cuml_avg_cyl_90S_90N.npy', data, allow_pickle=True)
-    
-
+#else:
+#    raise Exception("missing data file")
 
     

@@ -21,15 +21,19 @@ import time
 
 def main():
     p=argparse.ArgumentParser(description='Parse inputs for transport')
+    p.add_argument("-molecule",default="H2O",type=str, help="Molecule: H2O or OH")
     p.add_argument("-noon",default=0,type=int,help="Longitude of Local Noon")
     p.add_argument("-time",default=24,type=int,help="Run time in lunar hours")
-    p.add_argument("-dt",default=0.25,type=int,help="Step size in lunar hours")
+    p.add_argument("-dt",default=0.25,type=float,help="Step size in lunar hours")
     p.add_argument("-num",default=100,type=int,help="Number of particles")
     p.add_argument("-dir",default="../Results/",type=str, help="directory for output")
     args=p.parse_args()
     
     
     # Establish run parameters
+    # Establish molecule
+    molecule = args.molecule
+
     # Initial longitude of noon
     local_noon = args.noon
 
@@ -45,6 +49,8 @@ def main():
     # Assign directory
     directory= (args.dir)
     
+    #print(molecule, local_noon, t, dt, n)
+
     # ---------------------- RUN THE MODEL
     # establish particles
     particles = np.zeros((n, 3)) # latitude, longitude,  tod
@@ -60,10 +66,10 @@ def main():
 
     # Run model for n particles, 1 lunar day time step 1/2 hr (lunar)
     for i in range(0, n, 1):
-        results[i, :, :] = pr.Model_MonteCarlo(particles[i, :], dt, t, local_noon)
+        results[i, :, :] = pr.Model_MonteCarlo(particles[i, :], dt, t, local_noon, molecule)
         if i % 10 ==0:
             sys.stderr.flush()  
-            print('particle i: %2.0f; time t: %2.0f'%(i, st-time.time()), file=sys.stderr)
+            print('particle i: %2.0f; time t: %2.0f'%(i, time.time()-st), file=sys.stderr)
             sys.stderr.flush()
 
     #print('Total simulation time: %2.1f'%(time.time() - st))
@@ -73,9 +79,9 @@ def main():
 
     #loc = '/Users/laferrierek/Box Sync/Desktop/Research/Moon_Transport/Writing/Proposals/'
     # write file to .npy, .fits, .txt and .dat
-    filename = directory + 'Smooth_p' +str(n) + '_t' + str(int(t*dt)) +'.txt'
+    filename = directory + 'Smooth_p' +str(n) + '_t' + str(int(t/dt)) +'.npy'
     
-    np.savetxt(filename, results, delimiter=',', header=fheader)    
+    np.save(filename, results, allow_pickle=True)    
 
 
 if __name__ =='__main__':
