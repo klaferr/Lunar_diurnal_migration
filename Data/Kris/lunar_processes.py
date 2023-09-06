@@ -422,7 +422,7 @@ def surftime(R_bar, Temperature, pMass):
 
     perc_mono = 0.01
     theta_mon = 10**19 * perc_mono
-    tau_sub = (theta_mon/Avo*(m_H2O/1000)) / sub
+    tau_sub = (theta_mon/Avo*((pMass*Avo)/1000)) / sub
     
     return np.minimum(tau_surf, tau_sub)
 
