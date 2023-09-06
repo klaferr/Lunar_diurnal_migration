@@ -434,8 +434,8 @@ def Model_MonteCarlo(particle, dt, t, local_noon, molecule):
         sigma_Sputtering = 1/sput_rate_S23_H2O
         photo_lifespan =  1/photo_rate_S14_H2O
     elif molecule == "OH":
-        R_bar = R/(m_H2O/1000)
-        pMass = mass_H2O
+        R_bar = R/(m_O/H1000)
+        pMass = mass_OH
         sigma_Sputtering = 1/sput_rate_G19_OH
         photo_lifespan =  1/photo_rate_S23_OH
         
@@ -676,8 +676,8 @@ def Model_MonteCarlo_Rough(particle, dt, t, local_noon, molecule, omegaT):
         sigma_Sputtering = 1/sput_rate_S23_H2O
         photo_lifespan =  1/photo_rate_S14_H2O
     elif molecule == "OH":
-        R_bar = R/(m_H2O/1000)
-        pMass = mass_H2O
+        R_bar = R/(m_OH/1000)
+        pMass = mass_OH
         sigma_Sputtering = 1/sput_rate_G19_OH
         photo_lifespan =  1/photo_rate_S23_OH
         
