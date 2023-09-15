@@ -16,24 +16,6 @@ Created on Wed Sep 13 14:36:57 2023
 
 # not sure the space needed for 10,000 particles. that would take 100 hours or 5 days
 
-"""
-the sh file will have to be something along the lines of 
-create file
-run loop using file
-save with ID in name
-combine file
-
-# SBATCH
-python create_particles.py -args
-
-
-for i in $(seq 100)
-do
-   python loop_smooth.py --subset $i  
-done
-
-
-"""
 
 # this will be the code to run particle loops
 
@@ -79,17 +61,17 @@ def main():
     directory = (args.dirc)
     
     # Assign segment name
-    segment = args.segment
+    segment = args.segment - 1
     
     # ---------------------- RUN THE MODEL
     # establish particles
     filename = directory + 'Smooth_input_p' + str(n) + "_" + molecule + ".txt"
     particles = np.loadtxt(filename, delimiter =',', skiprows = 1)
+
+    sub = np.int(np.size(particles[:, 0])/10)
     
-    particles = particles[1000*segment:1000*segment+1000]
-    
-    sub = np.size(particles)
-    
+    particles = particles[sub*segment:sub*segment+sub, :]
+    print("seg:", segment, "start end:", sub*segment, sub*segment+sub)
     # run
     results = np.zeros((n, 8, int(t/dt)))
 
