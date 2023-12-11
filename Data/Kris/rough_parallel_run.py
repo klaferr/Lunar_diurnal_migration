@@ -83,6 +83,7 @@ def main():
     # ---------------------- RUN THE MODEL
     # establish particles
     filename = directory + 'Smooth_input_p' + str(n) + "_" + molecule + ".txt"
+
     particles = np.loadtxt(filename, delimiter =',', skiprows = 1)
 
     sub = np.int(np.size(particles[:, 0])/10)
@@ -90,7 +91,7 @@ def main():
     particles = particles[sub*segment:sub*segment+sub, :]
     print("seg:", segment, "start end:", sub*segment, sub*segment+sub)
     # run
-    results = np.zeros((n, 8, int(t/dt)))
+    results = np.zeros((sub, 8, int(t/dt)))
 
     # start timer
     st = time.time()

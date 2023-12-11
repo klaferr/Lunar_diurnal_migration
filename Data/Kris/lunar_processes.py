@@ -298,7 +298,6 @@ def sublimation_surf(P, T, mu):
     # output units are kg/m2/s
     return P*np.sqrt(mu/(2*np.pi*R*T))
 
-
 # desorption
 def desorption_R21(T, Ed):
     # From Sarantos and Tsavachidis 2021
