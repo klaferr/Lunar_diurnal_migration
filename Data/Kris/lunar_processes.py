@@ -12,7 +12,6 @@ from pathlib import Path
 import random
 from scipy import interpolate
 import time
-
 #%% Define values for inputs
 # Constants
 Avo = 6.0221*10**(23)               # 1/ mol
@@ -243,11 +242,7 @@ def landing_loc(in_lat, in_long, distance, radius, travel_dir):
 def sputtering_prob(tau, tof):
     prob = tof/tau
     test = random.randint(0, 99)
-    if round(prob*100) <= 0:
-        rounds = int(0)
-    else:
-        rounds = round(prob*100)
-    happens = random.sample(range(0,100), rounds)
+    happens = random.sample(range(0,100), round(prob*100))
     if test in happens:
         sputter = True
     else:
@@ -255,10 +250,12 @@ def sputtering_prob(tau, tof):
     return sputter
 
 # Photodissociation
-def photodestruction_inflight_prob(tau, tof):
+def photodestruction_inflight_prob(tau, tof, cosi):
     # this is equiv. to 1-e^(-t/tau), where if happens < prob, it is lost
     # here, it is if happens > prob, it is lost
-    probability = np.exp(-tof/tau)
+    
+    #probability = (1-cosi)*np.exp(-tof/(tau)) #/cosi))
+    probability = np.exp(-tof/(tau)) 
     happens = random.random()
     if happens >= probability:
         destroy = True
@@ -298,6 +295,7 @@ def sublimation_surf(P, T, mu):
     # output units are kg/m2/s
     return P*np.sqrt(mu/(2*np.pi*R*T))
 
+
 # desorption
 def desorption_R21(T, Ed):
     # From Sarantos and Tsavachidis 2021
@@ -318,6 +316,10 @@ def desorp_prob(tau, tof):
     else:
         destroy = False
     return destroy
+
+def cosi_smooth(lat, delta, hr):
+    cosi = np.sin(lat)*np.sin(delta) + np.cos(lat)*np.cos(delta)*np.cos(hr)
+    return cosi
 
 #%% Temperature from data
 def DivinerT(lat_r, long_r, tod, data):
@@ -397,14 +399,16 @@ def random_vals():
     launch = random.choices(launch_range, weights=np.cos(launch_range))[0]
     return direction, launch
 
-def loss(sigma_Sputtering, photo_lifespan, f_tof, tod):
+def loss(sigma_Sputtering, photo_lifespan, f_tof, tod, cosi):
     # Uses probability functions given time of a particle (in flight or sitting) with the lifetime from the literature
     # Considers sputtering and photodestruction. 
     
     # These mechanisms are sourced from solar UV/photons, so in theory they only occur on the lit portion
-    if tod > 6 and tod < 18:
+    if tod >= 6 and tod <= 18:
         cond1 = sputtering_prob(sigma_Sputtering, f_tof)
-        cond2 = photodestruction_inflight_prob(photo_lifespan, f_tof)
+        cond2 = photodestruction_inflight_prob(photo_lifespan, f_tof, cosi)
+
+        #cond2 = photodestruction_inflight_prob(photo_lifespan, f_tof)
         cond = np.any((cond1, cond2))
     else:
         # Loss only occurs during day time (an approximation for lit)
@@ -421,7 +425,7 @@ def surftime(R_bar, Temperature, pMass):
 
     perc_mono = 0.01
     theta_mon = 10**19 * perc_mono
-    tau_sub = (theta_mon/Avo*((pMass*Avo)/1000)) / sub
+    tau_sub = (theta_mon/Avo*(m_H2O/1000)) / sub
     
     return np.minimum(tau_surf, tau_sub)
 
@@ -433,8 +437,8 @@ def Model_MonteCarlo(particle, dt, t, local_noon, molecule):
         sigma_Sputtering = 1/sput_rate_S23_H2O
         photo_lifespan =  1/photo_rate_S14_H2O
     elif molecule == "OH":
-        R_bar = R/(m_O/H1000)
-        pMass = mass_OH
+        R_bar = R/(m_H2O/1000)
+        pMass = mass_H2O
         sigma_Sputtering = 1/sput_rate_G19_OH
         photo_lifespan =  1/photo_rate_S23_OH
         
@@ -465,12 +469,15 @@ def Model_MonteCarlo(particle, dt, t, local_noon, molecule):
         
         # define how long it sits for
         tau_surf = surftime(R_bar, results[3, i], pMass)  
+        
+        # define incidence angle
+        cosi = cosi_smooth(results[0, i], 0, results[2, i])
 
         # if it sits for a timestep, test lost, then move to next timestep
         if tau_surf >= lunar_dt:
             #print('Particle sits longer than a lunar time step')
             #print('Latitude: %2.0f, Longitude: %2.0f' %(np.rad2deg(results[0, i]), np.rad2deg(results[1, i])))
-            conda = loss(sigma_Sputtering, photo_lifespan, lunar_dt, results[2, i])
+            conda = loss(sigma_Sputtering, photo_lifespan, lunar_dt, results[2, i], cosi)
             if conda == True:
                 #print('Particle is lost from sitting')
                 results[4, i] = conda
@@ -493,7 +500,7 @@ def Model_MonteCarlo(particle, dt, t, local_noon, molecule):
             while tot_time < lunar_dt:
                 #print(tot_time, lunar_dt)
                 # while the time of jumping is less than a timestep
-                conda = loss(sigma_Sputtering, photo_lifespan, tau_surf, results[2, i])
+                conda = loss(sigma_Sputtering, photo_lifespan, tau_surf, results[2, i], cosi)
                 if conda == True:
                     #print('Particle is lost during sitting, following a jump')
                     # if lost to loss mechanism, exit loop. 
@@ -503,13 +510,14 @@ def Model_MonteCarlo(particle, dt, t, local_noon, molecule):
                     # let it bounce
                     direction, launch = random_vals() 
                     results[0:3, i+1], f_tof, distm, condc = ballistic(results[3, i], results[0, i], results[1, i], results[2, i], direction, launch, pMass, vel_dist)
+                    cosi = cosi_smooth(results[0, i+1], 0, results[2, i+1])
                     #print(results[0:3, i+1], f_tof, distm, condc)
                     if condc == True:
                         #print('Particle is lost to jeans loss')
                         results[4, i+1] = condc
                         break
                     else:
-                        condb = loss(sigma_Sputtering, photo_lifespan, f_tof, results[2, i])
+                        condb = loss(sigma_Sputtering, photo_lifespan, f_tof, results[2, i], cosi)
 
                         hops += 1
                         tof_tot += f_tof
@@ -569,6 +577,25 @@ def solar_zenith(lat, delta, h):
     cos_z = np.sin(lat)*np.sin(delta) + np.cos(lat)*np.cos(delta)*np.cos(h)
     return np.arccos(cos_z)
 
+def solar_azimuth(lat, d, hr, z):
+    # d is declination
+    # h is 
+    # z is solar zenith
+    cos_az = (np.sin(d)*np.cos(lat)-np.cos(hr)*np.cos(d)*np.sin(lat))/(np.sin(z))
+    return np.arccos(cos_az)
+
+def cosi_rough(lat, delta, h, theta, alpha):
+    # a is solar azimuth angle
+    # theta is slope aspect
+    # alpha is slope angle
+    # delta is declination, ==0
+    
+    z = solar_zenith(lat, delta, h)
+    a = solar_azimuth(lat, delta, h, z)
+    cos_z = np.cos(z)
+    cosi = np.cos(alpha)*cos_z + np.sin(alpha)*np.sin(z)*np.cos(theta-a)    
+    return cosi
+
 def f_cosi_theta(omega, i, z):
     c_p = np.cos(i + z)
     c_n = np.cos(i - z)
@@ -618,7 +645,6 @@ def LOLA(lat, long, data):
     
 
 def roughT(lat, long, tod, data, LOLAdata):
-    temp_flat, n = DivinerT(lat, long, tod, data) 
 
     if tod < 6 or tod > 18:
         #phi = np.arccos(np.cos((np.deg2rad((tod*15 - 180)))))
@@ -628,7 +654,9 @@ def roughT(lat, long, tod, data, LOLAdata):
         #for j in range(0, 5):
         #    sums[j] = a[j]*phi**j
         #T = np.sum(sums) + 35*(np.sin(np.abs(lat))-1)
+        temp_flat, n = DivinerT(lat, long, tod, data) 
         T = temp_flat
+        w = 0
         #print('Nighttime:', temp_flat, T)
         
     else:
@@ -665,7 +693,7 @@ def roughT(lat, long, tod, data, LOLAdata):
         T = random.choices(T_arr, weights=norm_weights)[0]
         #print('Daytime:', temp_flat, T_arr[np.argwhere(PDF_T==np.nanmax(PDF_T))], T)
     
-    return T
+    return T, w
 
 
 def Model_MonteCarlo_Rough(particle, dt, t, local_noon, molecule, omegaT):
@@ -675,8 +703,8 @@ def Model_MonteCarlo_Rough(particle, dt, t, local_noon, molecule, omegaT):
         sigma_Sputtering = 1/sput_rate_S23_H2O
         photo_lifespan =  1/photo_rate_S14_H2O
     elif molecule == "OH":
-        R_bar = R/(m_OH/1000)
-        pMass = mass_OH
+        R_bar = R/(m_H2O/1000)
+        pMass = mass_H2O
         sigma_Sputtering = 1/sput_rate_G19_OH
         photo_lifespan =  1/photo_rate_S23_OH
         
@@ -705,17 +733,19 @@ def Model_MonteCarlo_Rough(particle, dt, t, local_noon, molecule, omegaT):
         #st_time = time.time()
         #print('Lunar time: %2.1f'%i)
 
-        results[3, i] = roughT(results[0, i], results[1, i], results[2, i], data, loladata)
+        results[3, i], alpha = roughT(results[0, i], results[1, i], results[2, i], data, loladata)
         #print('Surface temperature: %2.0f K '%results[3, i])
 
         # define how long it sits for
         tau_surf = surftime(R_bar, results[3, i], pMass)  
 
+        cosi = cosi_rough(results[0, i], 0, results[2, i], 1/(np.pi*2), alpha)
+        
         # if it sits for a timestep, test lost, then move to next timestep
         if tau_surf >= lunar_dt:
             #print('Particle sits longer than a lunar time step')
             #print('Latitude: %2.0f, Longitude: %2.0f' %(np.rad2deg(results[0, i]), np.rad2deg(results[1, i])))
-            conda = loss(sigma_Sputtering, photo_lifespan, lunar_dt, results[2, i])
+            conda = loss(sigma_Sputtering, photo_lifespan, lunar_dt, results[2, i], cosi)
             if conda == True:
                 #print('Particle is lost from sitting')
                 results[4, i] = conda
@@ -738,7 +768,7 @@ def Model_MonteCarlo_Rough(particle, dt, t, local_noon, molecule, omegaT):
             while tot_time < lunar_dt:
                 #print(tot_time, lunar_dt)
                 # while the time of jumping is less than a timestep
-                conda = loss(sigma_Sputtering, photo_lifespan, tau_surf, results[2, i])
+                conda = loss(sigma_Sputtering, photo_lifespan, tau_surf, results[2, i], cosi)
                 if conda == True:
                     #print('Particle is lost during sitting, following a jump')
                     # if lost to loss mechanism, exit loop. 
@@ -748,13 +778,15 @@ def Model_MonteCarlo_Rough(particle, dt, t, local_noon, molecule, omegaT):
                     # let it bounce
                     direction, launch = random_vals() 
                     results[0:3, i+1], f_tof, distm, condc = ballistic(results[3, i], results[0, i], results[1, i], results[2, i], direction, launch, pMass, vel_dist)
-                    #print(results[0:3, i+1], f_tof, distm, condc)
+                    
+                    cosi = cosi_rough(results[0, i], 0, results[2, i], theta, alpha)
+
                     if condc == True:
                         #print('Particle is lost to jeans loss')
                         results[4, i+1] = condc
                         break
                     else:
-                        condb = loss(sigma_Sputtering, photo_lifespan, f_tof, results[2, i])
+                        condb = loss(sigma_Sputtering, photo_lifespan, f_tof, results[2, i], cosi)
 
                         hops += 1
                         tof_tot += f_tof
@@ -794,8 +826,196 @@ def Model_MonteCarlo_Rough(particle, dt, t, local_noon, molecule, omegaT):
             #print('New time of day: %2.1f'%results[2, i+1])
     return results[:, :-1]
 
+#%% With a production mechanism 
+def production_cosi(n, local_noon):
+    # how do we define production
+    ## highest proton flux (and in theory, formed water) would be at subsolar point
 
+    long_range = np.deg2rad(np.arange(0, 360, 1)) # this is in radians
 
+    # find cosi
+    long_start = int((local_noon - 90)%360) #int(np.rad2deg(np.min(long_range[cosi > 0])) %360)
+    long_stop = int((local_noon + 90)%360) #int(np.rad2deg(np.max(long_range[cosi > 0])) %360)
+
+    lat_range = np.deg2rad(np.arange(-90, 90))
+    # create particles
+    latweight = np.cos(lat_range)
+    longweight = -np.cos(np.deg2rad(np.arange(90, 270)))
+
+    # fails if local noon < 90 or greater than 270 degrees because of the limitations of the range function
+    if local_noon < 90 :
+        long_range = np.concatenate((range(long_start, 360), range(0, long_stop)))
+    elif local_noon >= 270:
+        long_range = np.concatenate((range(long_start, 360), range(0, long_stop)))
+    else:
+        long_range = range(long_start, long_stop)
+
+    particles = np.zeros((n, 3)) # latitude, longitude,  tod
+    particles[:, 0] = np.deg2rad(random.choices(range(-90, 90), weights=latweight, k=n)) # latitude in radians
+    particles[:, 1] = np.deg2rad(random.choices(long_range, weights=longweight , k=n)) # longitude in radians
+    particles[:, 2] = ((12+(((np.rad2deg(particles[:, 1])-local_noon))*24)/360))%24 # tod, based on where local noon is
+
+    return particles
+
+# Smooth model with production
+def Model_MonteCarlo_produce(particle, dt, t, ms, on, local_noon, molecule):
+    if molecule == "H2O":
+        R_bar = R/(m_H2O/1000)
+        pMass = mass_H2O
+        sigma_Sputtering = 1/sput_rate_S23_H2O
+        photo_lifespan =  1/photo_rate_S14_H2O
+    elif molecule == "OH":
+        R_bar = R/(m_H2O/1000)
+        pMass = mass_H2O
+        sigma_Sputtering = 1/sput_rate_G19_OH
+        photo_lifespan =  1/photo_rate_S23_OH
+        
+    else:
+        raise Exception("Must be OH or H2O")
+    
+    # number of particles
+    n = on
+    
+    # Number of added particles
+    ms = 10 # particles per step 
+    m = int((t/dt)*ms) # TOTAL added particles
+    
+    # results array
+    results = np.zeros((8, int(t/dt)+1))*np.nan # (lat, long, tod, temp, exists, total time, hops, dist), 2rd is time
+    
+    # if exists = True, set 1. Else, set 0
+    results[0:3, 0] = particle
+    results[4, 0] = False
+
+    for i in range(0, int(t/dt)-1, 1):
+        print('time step', i)
+        conda = False
+        condb = False
+        condc = False
+        
+        lunar_dt = sec_per_hour_M*dt
+        
+        n = len(results[:, 0, i][~np.isnan(results[:, 0, i])])
+        print('%2.0f particles to be run'%n)
+        
+        for nn in range(0, n-1, 1):
+            
+            if results[nn, 4, i] == 1 or np.isnan(results[nn, 4, i]):
+                #print('Particle already lost, skip')
+                pass
+    
+            else:
+                #print('Particle number:', nn)
+                # find initial temperature from location
+                results[nn, 3, i], num = DivinerT(results[nn, 0, i], results[nn, 1, i], results[nn, 2, i], data)
+                #print('Surface temperature: %2.0f K '%results[3, i])
+    
+                # define how long it sits for
+                tau_surf = surftime(R_bar, results[nn, 3, i], pMass)  
+    
+                # define incidence angle
+                cosi = cosi_smooth(results[nn, 0, i], 0, results[nn, 2, i])
+    
+                # if it sits for a timestep, test lost, then move to next timestep
+                if tau_surf >= lunar_dt:
+                    #print('Particle sits longer than a lunar time step')
+                    #print('Latitude: %2.0f, Longitude: %2.0f' %(np.rad2deg(results[0, i]), np.rad2deg(results[1, i])))
+                    conda = loss(sigma_Sputtering, photo_lifespan, lunar_dt, results[nn, 2, i], cosi)
+                    if conda == True:
+                        #print('Particle is lost from sitting')
+                        results[nn, 4, i] = conda
+                        results[nn, 4, i+1] = conda
+    
+                        #break
+                    else:
+                        #print('Particle is not lost from sitting')
+                        results[nn, 0:3, i+1] = results[nn, 0:3, i]
+                        results[nn, 4, i+1] = conda
+                        results[nn, 5, i] = 0
+                        results[nn, 6, i] = 0
+                        results[nn, 7, i] = 0
+    
+                else: 
+                    #print('Particle begins jump')
+                    tof_tot = 0
+                    tot_time = 0
+                    tot_dist = 0
+                    #conda == False
+                    hops = 0
+                    while tot_time < lunar_dt:
+                        #print(tot_time, lunar_dt)
+                        # while the time of jumping is less than a timestep
+                        conda = loss(sigma_Sputtering, photo_lifespan, tau_surf, results[nn, 2, i], cosi)
+                        if conda == True:
+                            #print('Particle is lost during sitting, following a jump')
+                            # if lost to loss mechanism, exit loop. 
+                            results[nn, 4, i+1] = conda
+                            break
+                        else:
+                            # let it bounce
+                            direction, launch = random_vals() 
+                            results[nn, 0:3, i+1], f_tof, distm, condc = ballistic(results[nn, 3, i], results[nn, 0, i], results[nn, 1, i], results[nn, 2, i], direction, launch, pMass, vel_dist)
+                            cosi = cosi_smooth(results[nn, 0, i+1], 0, results[nn, 2, i+1])
+                            #print(results[0:3, i+1], f_tof, distm, condc)
+                            if condc == True:
+                                #print('Particle is lost to jeans loss')
+                                results[nn, 4, i+1] = condc
+                                break
+                            else:
+                                condb = loss(sigma_Sputtering, photo_lifespan, f_tof, results[nn, 2, i], cosi)
+    
+                                hops += 1
+                                tof_tot += f_tof
+                                tot_dist += distm
+    
+                                # is it detroyed in the jump?
+                                if condb == True:
+                                    #print('Particle is lost in jump')
+                                    results[nn, 4, i+1] = condb
+                                    break
+                                else:
+                                    results[nn, 4, i+1] = condb
+                                    results[nn, 3, i+1], num = DivinerT(results[nn, 0, i+1], results[nn, 1, i+1], results[nn, 2, i+1], data)
+                                    tau_surf = surftime(R_bar, results[nn, 3, i+1], pMass)
+    
+                                    # advance total time. 
+                                    tot_time += (f_tof + tau_surf)
+    
+                    results[nn, 5, i] = tof_tot
+                    results[nn, 6, i] = hops
+                    results[nn, 7, i] = tot_dist                
+                    #print('Particle ends jump after %3.2e'%tot_time)
+                    #print('Particle is at: (%2.1f, %2.1f), %2.1f hr'%(np.rad2deg(results[0, i]), np.rad2deg(results[1, i]), results[2, i]))
+                #en = time.time()
+                #print('Time of step %3.0f is: %3.2f'%(i, en-st_time))
+        
+            if conda == True or condb == True or condc == True:
+                print('Particle %4.0f is lost from the simulation'%nn)
+                results[nn, 4, i] = True
+                results[nn, 4, i+1] = True
+    
+                conda = False
+                condb = False
+                condc = False
+    
+        else:
+            print('Moon rotates')
+            local_noon += (360/(t/dt)) # degrees
+            #print('Local noon: %2.1f'%local_noon)
+            results[nn, 2, i+1] = (12 + (np.rad2deg(results[nn, 1, i+1])+local_noon)*(24/360))%24 
+            #print('New time of day: %2.1f'%results[2, i+1])
+        
+            # now, add particles
+            if n+ms*i > on+m:
+                pass
+            else:
+                print("added %2.0f particles"%ms)
+                results[n+ms*i:n+ms*(i+1), 0:3, i+1] = production_cosi(ms, local_noon)
+                results[n+ms*i:n+ms*(i+1), 4, i+1] = np.zeros((ms))
+            
+    return results[:, :-1]
+    
+        
 
 #%% Using Diviner Bolometric temperatures - this takes ~ 3 min if file doesn't exist
 def Diviner_nan(data):
@@ -803,14 +1023,60 @@ def Diviner_nan(data):
     data[mask, 10] = np.nan
     return data
 
-#loc = ''
-path_to_file = '/home/klaferri/Desktop/Research/Lunar_diurnal_migration/Data/Kris/global_cuml_avg_cyl_90S_90N.npy'
-#path = Path(path_to_file)
-data = np.load(path_to_file, allow_pickle=True)
-#if path.is_file():
-#    data = np.load(path_to_file, allow_pickle=True)
+loc = '/Users/laferrierek/Box Sync/Desktop/Research/Moon_Transport/Codes/Data/'
+path_to_file = loc+'global_cuml_avg_cyl_90S_90N.npy'
+path = Path(path_to_file)
 
-#else:
-#    raise Exception("missing data file")
+if path.is_file():
+    data = np.load(path_to_file, allow_pickle=True)
+
+else:
+
+    data0_10N = np.loadtxt(loc+'global_cumul_avg_cyl_00n10n_002.txt', delimiter=',', skiprows=1)
+    data10_20N = np.loadtxt(loc+'global_cumul_avg_cyl_10n20n_002.txt', delimiter=',', skiprows=1)
+    data20_30N = np.loadtxt(loc+'global_cumul_avg_cyl_20n30n_002.txt', delimiter=',', skiprows=1)
+    data30_40N = np.loadtxt(loc+'global_cumul_avg_cyl_30n40n_002.txt', delimiter=',', skiprows=1)
+    data40_50N = np.loadtxt(loc+'global_cumul_avg_cyl_40n50n_002.txt', delimiter=',', skiprows=1)
+    data50_60N = np.loadtxt(loc+'global_cumul_avg_cyl_50n60n_002.txt', delimiter=',', skiprows=1)
+    data60_70N = np.loadtxt(loc+'global_cumul_avg_cyl_60n70n_002.txt', delimiter=',', skiprows=1)
+    data70_80N = np.loadtxt(loc+'global_cumul_avg_cyl_70n80n_002.txt', delimiter=',', skiprows=1)
+    data80_90N = np.loadtxt(loc+'global_cumul_avg_cyl_80n90n_002.txt', delimiter=',', skiprows=1)
+    
+    data0_10S = np.loadtxt(loc+'global_cumul_avg_cyl_10s00s_002.txt', delimiter=',', skiprows=1)
+    data10_20S = np.loadtxt(loc+'global_cumul_avg_cyl_20s10s_002.txt', delimiter=',', skiprows=1)
+    data20_30S = np.loadtxt(loc+'global_cumul_avg_cyl_30s20s_002.txt', delimiter=',', skiprows=1)
+    data30_40S = np.loadtxt(loc+'global_cumul_avg_cyl_40s30s_002.txt', delimiter=',', skiprows=1)
+    data40_50S = np.loadtxt(loc+'global_cumul_avg_cyl_50s40s_002.txt', delimiter=',', skiprows=1)
+    data50_60S = np.loadtxt(loc+'global_cumul_avg_cyl_60s50s_002.txt', delimiter=',', skiprows=1)
+    data60_70S = np.loadtxt(loc+'global_cumul_avg_cyl_70s60s_002.txt', delimiter=',', skiprows=1)
+    data70_80S = np.loadtxt(loc+'global_cumul_avg_cyl_80s70s_002.txt', delimiter=',', skiprows=1)
+    data80_90S = np.loadtxt(loc+'global_cumul_avg_cyl_90s80s_002.txt', delimiter=',', skiprows=1)
+
+    data0_10N = Diviner_nan(data0_10N)
+    data10_20N = Diviner_nan(data10_20N)
+    data20_30N = Diviner_nan(data20_30N)
+    data30_40N = Diviner_nan(data30_40N)
+    data40_50N = Diviner_nan(data40_50N)
+    data50_60N = Diviner_nan(data50_60N)
+    data60_70N = Diviner_nan(data60_70N)
+    data70_80N = Diviner_nan(data70_80N)
+    data80_90N = Diviner_nan(data80_90N)
+    
+    data0_10S = Diviner_nan(data0_10S)
+    data10_20S = Diviner_nan(data10_20S)
+    data20_30S = Diviner_nan(data20_30S)
+    data30_40S = Diviner_nan(data30_40S)
+    data40_50S = Diviner_nan(data40_50S)
+    data50_60S = Diviner_nan(data50_60S)
+    data60_70S = Diviner_nan(data60_70S)
+    data70_80S = Diviner_nan(data70_80S)
+    data80_90S = Diviner_nan(data80_90S)
+    
+    data = np.stack([data80_90S, data70_80S, data60_70S, data50_60S, data40_50S, data30_40S, data20_30S, data10_20S, data0_10S, data0_10N, data10_20N, data20_30N, data30_40N, data40_50N, data50_60N, data60_70N, data70_80N, data80_90N])
+    
+    # save it
+    np.save(loc+'global_cuml_avg_cyl_90S_90N.npy', data, allow_pickle=True)
+    
+
 
     
