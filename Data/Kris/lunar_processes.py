@@ -12,6 +12,8 @@ from pathlib import Path
 import random
 from scipy import interpolate
 import time
+import sys
+
 #%% Define values for inputs
 # Constants
 Avo = 6.0221*10**(23)               # 1/ mol
@@ -553,7 +555,7 @@ def Model_MonteCarlo(particle, dt, t, local_noon, molecule):
             #print('Moon rotates')
             local_noon += (360/(t/dt)) # degrees
             #print('Local noon: %2.1f'%local_noon)
-            results[2, i+1] = (12 + (np.rad2deg(results[1, i+1])+local_noon)*(24/360))%24 
+            results[2, i+1] = (12 + (np.rad2deg(results[1, i+1])-local_noon)*(24/360))%24 
             #print('New time of day: %2.1f'%results[2, i+1])
     return results[:, :-1]
 
@@ -779,7 +781,7 @@ def Model_MonteCarlo_Rough(particle, dt, t, local_noon, molecule, omegaT):
                     direction, launch = random_vals() 
                     results[0:3, i+1], f_tof, distm, condc = ballistic(results[3, i], results[0, i], results[1, i], results[2, i], direction, launch, pMass, vel_dist)
                     
-                    cosi = cosi_rough(results[0, i], 0, results[2, i], theta, alpha)
+                    cosi = cosi_rough(results[0, i], 0, results[2, i], 1/(np.pi*2), alpha)
 
                     if condc == True:
                         #print('Particle is lost to jeans loss')
@@ -799,7 +801,7 @@ def Model_MonteCarlo_Rough(particle, dt, t, local_noon, molecule, omegaT):
                             break
                         else:
                             results[4, i+1] = condb
-                            results[3, i+1] = roughT(results[0, i+1], results[1, i+1], results[2, i+1], data, loladata)
+                            results[3, i+1], alpha = roughT(results[0, i+1], results[1, i+1], results[2, i+1], data, loladata)
                             tau_surf = surftime(R_bar, results[3, i+1], pMass)
                             #print(tau_surf, f_tof)
                             # advance total time. 
@@ -822,9 +824,9 @@ def Model_MonteCarlo_Rough(particle, dt, t, local_noon, molecule, omegaT):
             #print('Moon rotates')
             local_noon += (360/(t/dt)) # degrees
             #print('Local noon: %2.1f'%local_noon)
-            results[2, i+1] = (12 + (np.rad2deg(results[1, i+1])+local_noon)*(24/360))%24 
+            results[2, i+1] = (12 + (np.rad2deg(results[1, i+1])-local_noon)*(24/360))%24 
             #print('New time of day: %2.1f'%results[2, i+1])
-    return results[:, :-1]
+    return results
 
 #%% With a production mechanism 
 def production_cosi(n, local_noon):
@@ -877,15 +879,15 @@ def Model_MonteCarlo_produce(particle, dt, t, ms, on, local_noon, molecule):
     n = on
     
     # Number of added particles
-    ms = 10 # particles per step 
+    # ms: particles per step 
     m = int((t/dt)*ms) # TOTAL added particles
     
     # results array
-    results = np.zeros((8, int(t/dt)+1))*np.nan # (lat, long, tod, temp, exists, total time, hops, dist), 2rd is time
+    results = np.zeros((n+m, 8, int(t/dt)+1))*np.nan # (lat, long, tod, temp, exists, total time, hops, dist), 2rd is time
     
     # if exists = True, set 1. Else, set 0
-    results[0:3, 0] = particle
-    results[4, 0] = False
+    results[:n, 0:3, 0] = particle
+    results[:n, 4, 0] = False
 
     for i in range(0, int(t/dt)-1, 1):
         print('time step', i)
@@ -895,10 +897,10 @@ def Model_MonteCarlo_produce(particle, dt, t, ms, on, local_noon, molecule):
         
         lunar_dt = sec_per_hour_M*dt
         
-        n = len(results[:, 0, i][~np.isnan(results[:, 0, i])])
-        print('%2.0f particles to be run'%n)
+        ln = n+ms*i #len(results[:, 0, i][~np.isnan(results[:, 0, i])])
+        print('%2.0f particles to be run'%ln)
         
-        for nn in range(0, n-1, 1):
+        for nn in range(0, ln, 1):
             
             if results[nn, 4, i] == 1 or np.isnan(results[nn, 4, i]):
                 #print('Particle already lost, skip')
@@ -923,13 +925,12 @@ def Model_MonteCarlo_produce(particle, dt, t, ms, on, local_noon, molecule):
                     conda = loss(sigma_Sputtering, photo_lifespan, lunar_dt, results[nn, 2, i], cosi)
                     if conda == True:
                         #print('Particle is lost from sitting')
-                        results[nn, 4, i] = conda
                         results[nn, 4, i+1] = conda
     
                         #break
                     else:
                         #print('Particle is not lost from sitting')
-                        results[nn, 0:3, i+1] = results[nn, 0:3, i]
+                        results[nn, 0:4, i+1] = results[nn, 0:4, i]
                         results[nn, 4, i+1] = conda
                         results[nn, 5, i] = 0
                         results[nn, 6, i] = 0
@@ -941,6 +942,7 @@ def Model_MonteCarlo_produce(particle, dt, t, ms, on, local_noon, molecule):
                     tot_time = 0
                     tot_dist = 0
                     #conda == False
+                    jump_hold = results[nn, :, i]
                     hops = 0
                     while tot_time < lunar_dt:
                         #print(tot_time, lunar_dt)
@@ -950,19 +952,21 @@ def Model_MonteCarlo_produce(particle, dt, t, ms, on, local_noon, molecule):
                             #print('Particle is lost during sitting, following a jump')
                             # if lost to loss mechanism, exit loop. 
                             results[nn, 4, i+1] = conda
+                            jump_hold = np.zeros((8))*np.nan
                             break
                         else:
                             # let it bounce
                             direction, launch = random_vals() 
-                            results[nn, 0:3, i+1], f_tof, distm, condc = ballistic(results[nn, 3, i], results[nn, 0, i], results[nn, 1, i], results[nn, 2, i], direction, launch, pMass, vel_dist)
-                            cosi = cosi_smooth(results[nn, 0, i+1], 0, results[nn, 2, i+1])
+                            jump_hold[0:3], f_tof, distm, condc = ballistic(jump_hold[3], jump_hold[0], jump_hold[1], jump_hold[2], direction, launch, pMass, vel_dist)
+                            cosi = cosi_smooth(jump_hold[0], 0, jump_hold[2])
                             #print(results[0:3, i+1], f_tof, distm, condc)
                             if condc == True:
                                 #print('Particle is lost to jeans loss')
                                 results[nn, 4, i+1] = condc
+                                jump_hold = np.zeros((8))*np.nan
                                 break
                             else:
-                                condb = loss(sigma_Sputtering, photo_lifespan, f_tof, results[nn, 2, i], cosi)
+                                condb = loss(sigma_Sputtering, photo_lifespan, f_tof, jump_hold[2], cosi)
     
                                 hops += 1
                                 tof_tot += f_tof
@@ -972,15 +976,16 @@ def Model_MonteCarlo_produce(particle, dt, t, ms, on, local_noon, molecule):
                                 if condb == True:
                                     #print('Particle is lost in jump')
                                     results[nn, 4, i+1] = condb
+                                    jump_hold = np.zeros((8))*np.nan
                                     break
                                 else:
                                     results[nn, 4, i+1] = condb
-                                    results[nn, 3, i+1], num = DivinerT(results[nn, 0, i+1], results[nn, 1, i+1], results[nn, 2, i+1], data)
-                                    tau_surf = surftime(R_bar, results[nn, 3, i+1], pMass)
+                                    jump_hold[3], num = DivinerT(jump_hold[0], jump_hold[1], jump_hold[2], data)
+                                    tau_surf = surftime(R_bar, jump_hold[3], pMass)
     
                                     # advance total time. 
                                     tot_time += (f_tof + tau_surf)
-    
+                    results[nn, 0:4, i+1] = jump_hold[0:4]
                     results[nn, 5, i] = tof_tot
                     results[nn, 6, i] = hops
                     results[nn, 7, i] = tot_dist                
@@ -991,29 +996,31 @@ def Model_MonteCarlo_produce(particle, dt, t, ms, on, local_noon, molecule):
         
             if conda == True or condb == True or condc == True:
                 print('Particle %4.0f is lost from the simulation'%nn)
-                results[nn, 4, i] = True
                 results[nn, 4, i+1] = True
     
                 conda = False
                 condb = False
                 condc = False
     
-        else:
-            print('Moon rotates')
-            local_noon += (360/(t/dt)) # degrees
-            #print('Local noon: %2.1f'%local_noon)
-            results[nn, 2, i+1] = (12 + (np.rad2deg(results[nn, 1, i+1])+local_noon)*(24/360))%24 
-            #print('New time of day: %2.1f'%results[2, i+1])
+
+        print('Moon rotates')
+        local_noon += (360/(t/dt)) # degrees
+        #print('Local noon: %2.1f'%local_noon)
+        results[:, 2, i+1] = (12 + (np.rad2deg(results[:, 1, i+1])-local_noon)*(24/360))%24 
+        #print('New time of day: %2.1f'%results[2, i+1])
         
-            # now, add particles
-            if n+ms*i > on+m:
-                pass
-            else:
-                print("added %2.0f particles"%ms)
-                results[n+ms*i:n+ms*(i+1), 0:3, i+1] = production_cosi(ms, local_noon)
-                results[n+ms*i:n+ms*(i+1), 4, i+1] = np.zeros((ms))
-            
-    return results[:, :-1]
+        # now, add particles
+        if n+ms*i > on+m:
+            pass
+        else:
+            print("added %2.0f particles"%ms)
+            results[n+ms*i:n+ms*(i+1), 0:3, i+1] = production_cosi(ms, local_noon)
+            results[n+ms*i:n+ms*(i+1), 4, i+1] = np.zeros((ms))
+        if i % 10 ==0:
+            sys.stderr.flush()  
+            print('particle i: %2.0f; time t: %2.0f'%(nn, i), file=sys.stderr)
+            sys.stderr.flush()    
+    return results
     
         
 
@@ -1023,60 +1030,9 @@ def Diviner_nan(data):
     data[mask, 10] = np.nan
     return data
 
-loc = '/Users/laferrierek/Box Sync/Desktop/Research/Moon_Transport/Codes/Data/'
-path_to_file = loc+'global_cuml_avg_cyl_90S_90N.npy'
-path = Path(path_to_file)
-
-if path.is_file():
-    data = np.load(path_to_file, allow_pickle=True)
-
-else:
-
-    data0_10N = np.loadtxt(loc+'global_cumul_avg_cyl_00n10n_002.txt', delimiter=',', skiprows=1)
-    data10_20N = np.loadtxt(loc+'global_cumul_avg_cyl_10n20n_002.txt', delimiter=',', skiprows=1)
-    data20_30N = np.loadtxt(loc+'global_cumul_avg_cyl_20n30n_002.txt', delimiter=',', skiprows=1)
-    data30_40N = np.loadtxt(loc+'global_cumul_avg_cyl_30n40n_002.txt', delimiter=',', skiprows=1)
-    data40_50N = np.loadtxt(loc+'global_cumul_avg_cyl_40n50n_002.txt', delimiter=',', skiprows=1)
-    data50_60N = np.loadtxt(loc+'global_cumul_avg_cyl_50n60n_002.txt', delimiter=',', skiprows=1)
-    data60_70N = np.loadtxt(loc+'global_cumul_avg_cyl_60n70n_002.txt', delimiter=',', skiprows=1)
-    data70_80N = np.loadtxt(loc+'global_cumul_avg_cyl_70n80n_002.txt', delimiter=',', skiprows=1)
-    data80_90N = np.loadtxt(loc+'global_cumul_avg_cyl_80n90n_002.txt', delimiter=',', skiprows=1)
-    
-    data0_10S = np.loadtxt(loc+'global_cumul_avg_cyl_10s00s_002.txt', delimiter=',', skiprows=1)
-    data10_20S = np.loadtxt(loc+'global_cumul_avg_cyl_20s10s_002.txt', delimiter=',', skiprows=1)
-    data20_30S = np.loadtxt(loc+'global_cumul_avg_cyl_30s20s_002.txt', delimiter=',', skiprows=1)
-    data30_40S = np.loadtxt(loc+'global_cumul_avg_cyl_40s30s_002.txt', delimiter=',', skiprows=1)
-    data40_50S = np.loadtxt(loc+'global_cumul_avg_cyl_50s40s_002.txt', delimiter=',', skiprows=1)
-    data50_60S = np.loadtxt(loc+'global_cumul_avg_cyl_60s50s_002.txt', delimiter=',', skiprows=1)
-    data60_70S = np.loadtxt(loc+'global_cumul_avg_cyl_70s60s_002.txt', delimiter=',', skiprows=1)
-    data70_80S = np.loadtxt(loc+'global_cumul_avg_cyl_80s70s_002.txt', delimiter=',', skiprows=1)
-    data80_90S = np.loadtxt(loc+'global_cumul_avg_cyl_90s80s_002.txt', delimiter=',', skiprows=1)
-
-    data0_10N = Diviner_nan(data0_10N)
-    data10_20N = Diviner_nan(data10_20N)
-    data20_30N = Diviner_nan(data20_30N)
-    data30_40N = Diviner_nan(data30_40N)
-    data40_50N = Diviner_nan(data40_50N)
-    data50_60N = Diviner_nan(data50_60N)
-    data60_70N = Diviner_nan(data60_70N)
-    data70_80N = Diviner_nan(data70_80N)
-    data80_90N = Diviner_nan(data80_90N)
-    
-    data0_10S = Diviner_nan(data0_10S)
-    data10_20S = Diviner_nan(data10_20S)
-    data20_30S = Diviner_nan(data20_30S)
-    data30_40S = Diviner_nan(data30_40S)
-    data40_50S = Diviner_nan(data40_50S)
-    data50_60S = Diviner_nan(data50_60S)
-    data60_70S = Diviner_nan(data60_70S)
-    data70_80S = Diviner_nan(data70_80S)
-    data80_90S = Diviner_nan(data80_90S)
-    
-    data = np.stack([data80_90S, data70_80S, data60_70S, data50_60S, data40_50S, data30_40S, data20_30S, data10_20S, data0_10S, data0_10N, data10_20N, data20_30N, data30_40N, data40_50N, data50_60N, data60_70N, data70_80N, data80_90N])
-    
-    # save it
-    np.save(loc+'global_cuml_avg_cyl_90S_90N.npy', data, allow_pickle=True)
-    
-
+#loc = ''
+path_to_file = '/home/klaferri/Desktop/Research/Lunar_diurnal_migration/Data/Kris/global_cuml_avg_cyl_90S_90N.npy'
+#path = Path(path_to_file)
+data = np.load(path_to_file, allow_pickle=True)
 
     

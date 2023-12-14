@@ -86,12 +86,12 @@ def main():
 
     particles = np.loadtxt(filename, delimiter =',', skiprows = 1)
 
-    sub = np.int(np.size(particles[:, 0])/10)
+    sub = int(np.size(particles[:, 0])/100)
     
     particles = particles[sub*segment:sub*segment+sub, :]
     print("seg:", segment, "start end:", sub*segment, sub*segment+sub)
     # run
-    results = np.zeros((sub, 8, int(t/dt)))
+    results = np.zeros((sub, 8, int(t/dt)+1))
 
     # start timer
     st = time.time()
