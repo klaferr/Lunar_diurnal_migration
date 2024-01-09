@@ -148,7 +148,7 @@ def exosphere_multiple(particle, tt, dt, t, local_noon, molecule):
                 out[1, i+1] = out[1, i]
 
                 # rotate Moon timestep 
-                local_noon += (360/(t/dt)) # degrees
+                local_noon += (-(360/(t/dt)))%360 # degrees
                 out[2, i+1] = (12 + (np.rad2deg(out[1, i+1])+local_noon)*(24/360))%24   
 
             out[4, i] = conda
@@ -257,7 +257,7 @@ def exosphere_multiple_rough(particle, tt, dt, t, local_noon, molecule, omegaT):
                 out[1, i+1] = out[1, i]
 
                 # rotate Moon timestep 
-                local_noon += (360/(t/dt)) # degrees
+                local_noon += (-(360/(t/dt)))%360 # degrees
                 out[2, i+1] = (12 + (np.rad2deg(out[1, i+1])+local_noon)*(24/360))%24   
 
             out[4, i] = conda

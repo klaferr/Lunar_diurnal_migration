@@ -553,7 +553,9 @@ def Model_MonteCarlo(particle, dt, t, local_noon, molecule):
             break
         else:
             #print('Moon rotates')
-            local_noon += (360/(t/dt)) # degrees
+            local_noon += (-(360/(t/dt)))
+            local_noon = local_noon%360            
+            #local_noon += (-(360/(t/dt)))%360 # degrees
             #print('Local noon: %2.1f'%local_noon)
             results[2, i+1] = (12 + (np.rad2deg(results[1, i+1])-local_noon)*(24/360))%24 
             #print('New time of day: %2.1f'%results[2, i+1])
@@ -822,7 +824,9 @@ def Model_MonteCarlo_Rough(particle, dt, t, local_noon, molecule, omegaT):
             break
         else:
             #print('Moon rotates')
-            local_noon += (360/(t/dt)) # degrees
+            local_noon += (-(360/(t/dt)))
+            local_noon = local_noon%360
+            #local_noon += (-(360/(t/dt)))%360 # degrees
             #print('Local noon: %2.1f'%local_noon)
             results[2, i+1] = (12 + (np.rad2deg(results[1, i+1])-local_noon)*(24/360))%24 
             #print('New time of day: %2.1f'%results[2, i+1])
@@ -851,7 +855,8 @@ def production_cosi(n, local_noon):
         long_range = np.concatenate((range(long_start, 360), range(0, long_stop)))
     else:
         long_range = range(long_start, long_stop)
-
+    
+    print(local_noon, np.shape(longweight), np.shape(long_range), n)
     particles = np.zeros((n, 3)) # latitude, longitude,  tod
     particles[:, 0] = np.deg2rad(random.choices(range(-90, 90), weights=latweight, k=n)) # latitude in radians
     particles[:, 1] = np.deg2rad(random.choices(long_range, weights=longweight , k=n)) # longitude in radians
@@ -1004,7 +1009,9 @@ def Model_MonteCarlo_produce(particle, dt, t, ms, on, local_noon, molecule):
     
 
         print('Moon rotates')
-        local_noon += (360/(t/dt)) # degrees
+        local_noon += (-(360/(t/dt)))
+        local_noon = local_noon%360
+        #local_noon += (-(360/(t/dt)))%360 # degrees
         #print('Local noon: %2.1f'%local_noon)
         results[:, 2, i+1] = (12 + (np.rad2deg(results[:, 1, i+1])-local_noon)*(24/360))%24 
         #print('New time of day: %2.1f'%results[2, i+1])

@@ -86,19 +86,3 @@ def main():
 if __name__ =='__main__':
     main()
 
-# establish particles
-"""
-## establish weights
-weight_cos = np.linspace(-np.pi/2, np.pi/2, 180)
-weight_lon = np.sin(np.linspace(0, 2*np.pi, 360)-np.pi/2)
-mask = weight_lon < 0
-weight_lon[mask] = 0
-
-particles = np.zeros((n, 3)) # latitude, longitude,  tod
-particles[:, 0] = np.deg2rad(random.choices(range(-90, 90), weights=np.cos(weight_cos), k=n)) # latitude in degrees
-particles[:, 1] = np.deg2rad(random.choices(range(0, 360), weights=weight_lon, k=n)) # longitude in degrees
-particles[:, 2] = (12+(((np.rad2deg(particles[:, 1]-local_noon))*24)/360))%24 # tod, based on where local noon is
-"""
-
-
-

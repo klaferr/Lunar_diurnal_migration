@@ -108,7 +108,7 @@ def main():
     #fheader = "latitude, longitude, time of day, temperature, condition, tot time/step, hops per timestep, distance/step"
 
     # save as .npy file
-    filename = directory + 'Rough_p' +str(n) + '_t' + str(int(t*dt)) + '_' + molecule + '_i' + str(int(segment)) + '.npy'
+    filename = directory + 'Rough_p' +str(n) + '_t' + str(int(t/dt)) + '_' + molecule + '_i' + str(int(segment)) + '.npy'
     
     np.save(filename, results, allow_pickle=True)    
 

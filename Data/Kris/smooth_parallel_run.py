@@ -68,7 +68,7 @@ def main():
     filename = directory + 'Smooth_input_p' + str(n) + "_" + molecule + ".txt"
     particles = np.loadtxt(filename, delimiter =',', skiprows = 1)
 
-    sub = np.int(np.size(particles[:, 0])/10)
+    sub = np.int(np.size(particles[:, 0])/100)
     
     particles = particles[sub*segment:sub*segment+sub, :]
     print("seg:", segment, "start end:", sub*segment, sub*segment+sub)
@@ -90,7 +90,7 @@ def main():
     #fheader = "latitude, longitude, time of day, temperature, condition, tot time/step, hops per timestep, distance/step"
 
     # save as .npy file
-    filename = directory + 'Smooth_p' +str(n) + '_t' + str(int(t*dt)) + '_' + molecule + '_i' + str(int(segment)) + '.npy'
+    filename = directory + 'Smooth_p' +str(n) + '_t' + str(int(t/dt)) + '_' + molecule + '_i' + str(int(segment)) + '.npy'
     
     np.save(filename, results, allow_pickle=True)    
 
