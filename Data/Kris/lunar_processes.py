@@ -559,7 +559,7 @@ def Model_MonteCarlo(particle, dt, t, local_noon, molecule):
             #print('Local noon: %2.1f'%local_noon)
             results[2, i+1] = (12 + (np.rad2deg(results[1, i+1])-local_noon)*(24/360))%24 
             #print('New time of day: %2.1f'%results[2, i+1])
-    return results[:, :-1]
+    return results
 
  
 #%% Rubanenko et al. (2020) roughness surface temperatures   
@@ -720,7 +720,7 @@ def Model_MonteCarlo_Rough(particle, dt, t, local_noon, molecule, omegaT):
 
     # results array
     results = np.zeros((8, int(t/dt)+1))*np.nan # (lat, long, tod, temp, exists, total time, hops, dist), 2rd is time
-    
+
     # if exists = True, set 1. Else, set 0
     
     i = 0

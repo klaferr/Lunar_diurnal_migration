@@ -73,7 +73,7 @@ def main():
     particles = particles[sub*segment:sub*segment+sub, :]
     print("seg:", segment, "start end:", sub*segment, sub*segment+sub)
     # run
-    results = np.zeros((n, 8, int(t/dt)))
+    results = np.zeros((sub, 8, int(t/dt)+1))
 
     # start timer
     st = time.time()
