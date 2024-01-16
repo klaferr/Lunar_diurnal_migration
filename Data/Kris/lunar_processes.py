@@ -242,14 +242,13 @@ def landing_loc(in_lat, in_long, distance, radius, travel_dir):
 #%% Loss functions
 ## Sputtering
 def sputtering_prob(tau, tof):
-    prob = tof/tau
-    test = random.randint(0, 99)
-    happens = random.sample(range(0,100), round(prob*100))
-    if test in happens:
-        sputter = True
+   probability = np.exp(-tof/(tau))
+    happens = random.random()
+    if happens >= probability:
+        destroy = True
     else:
-        sputter = False
-    return sputter
+        destroy = False
+    return destroy
 
 # Photodissociation
 def photodestruction_inflight_prob(tau, tof, cosi):
